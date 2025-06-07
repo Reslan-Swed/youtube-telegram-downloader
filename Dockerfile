@@ -43,9 +43,6 @@ ENV YT_DLP_FFMPEG_PATH=/usr/bin/ffmpeg
 # Expose the port (Railway will detect this)
 EXPOSE ${APP_PORT}
 
-# Create volumes for logs and downloads
-VOLUME ["/app/logs", "/app/downloads"]
-
 # Run the application with the configurable port and environment variables
 CMD ["sh", "-c", "if [ \"$PUBLIC_DOWNLOAD_URL\" = \"REQUIRED_AT_RUNTIME\" ]; then echo \"ERROR: PUBLIC_DOWNLOAD_URL environment variable must be set\"; exit 1; fi && \
     java -jar target/youtube-telegram-downloader.jar \
