@@ -1,0 +1,7 @@
+target/
+.git/
+.idea/
+downloads/
+logs/
+*.iml
+src/main/resources/application-dev.properties

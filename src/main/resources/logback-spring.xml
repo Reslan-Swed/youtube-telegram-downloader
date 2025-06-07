@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Include Spring Boot defaults -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    
+    <!-- Console appender configuration -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- File appender configuration -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/youtube-downloader.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/youtube-downloader.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>10</maxHistory>
+            <totalSizeCap>100MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    
+    <!-- Profile-specific configurations -->
+    <springProfile name="dev">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE" />
+        </root>
+        <logger name="com.stackbase.ytdownloader" level="DEBUG" />
+    </springProfile>
+    
+    <springProfile name="prod">
+        <root level="ERROR">
+            <appender-ref ref="CONSOLE" />
+        </root>
+
+        <logger name="com.stackbase.ytdownloader" level="DEBUG" additivity="false">
+            <appender-ref ref="FILE" />
+        </logger>
+    </springProfile>
+    
+    <springProfile name="silent">
+        <root level="ERROR">
+            <appender-ref ref="CONSOLE" />
+        </root>
+        <logger name="com.stackbase.ytdownloader" level="OFF" />
+    </springProfile>
+    
+    <!-- Default profile if none specified -->
+    <springProfile name="default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE" />
+        </root>
+        <logger name="com.stackbase.ytdownloader" level="INFO" />
+    </springProfile>
+</configuration>
