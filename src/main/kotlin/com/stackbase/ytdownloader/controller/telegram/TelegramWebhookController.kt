@@ -79,30 +79,35 @@ class TelegramWebhookController(
 
                             logger.info("Starting audio download: {}kbps, URL: {}", kbps, url)
                             telegramBotService.answerCallback(callbackId, "🎶 Downloading started...")
-                            telegramBotService.editMessageText(chatId, messageId, "🎶 Downloading audio at ${kbps}kbps...")
+                            telegramBotService.editMessageText(
+                                chatId,
+                                messageId,
+                                "🎶 Downloading audio at ${kbps}kbps..."
+                            )
 
-                            val file = ytDlpService.downloadAudio(url, kbps, "$chatId")
+                            val (errorMessage, file) = ytDlpService.downloadAudio(url, kbps, "$chatId")
                             if (file != null) {
                                 logger.info("Audio download completed: {}, size: {} bytes", file.name, file.length())
+                                telegramBotService.editMessageText(chatId, messageId, "✅ Audio downloaded.")
                                 if (file.length() < maxBotFileSize) {
                                     telegramBotService.sendFile(chatId, file)
                                 } else {
-                                    val encodedFileName = URLEncoder.encode(file.name, StandardCharsets.UTF_8.toString())
+                                    val encodedFileName =
+                                        URLEncoder.encode(file.name, StandardCharsets.UTF_8.toString())
                                     val downloadUrl = "$publicUrl/$chatId/$encodedFileName"
                                     telegramBotService.sendTextMessage(
                                         chatId,
-                                        "✅ Audio downloaded. File is too large for Telegram. Download it here: $downloadUrl"
+                                        "File is too large for Telegram. Download it here: $downloadUrl"
                                     )
                                 }
                             } else {
-                                logger.error("Audio download failed for URL: {}", url)
-                                telegramBotService.sendTextMessage(
+                                logger.error("Audio download failed: {}", errorMessage)
+                                telegramBotService.editMessageText(
                                     chatId,
-                                    "❌ Audio download failed."
+                                    messageId,
+                                    "❌ $errorMessage"
                                 )
                             }
-
-                            telegramBotService.editMessageText(chatId, messageId, "✅ Download complete!")
                         }
 
                         "video" -> {
@@ -118,28 +123,29 @@ class TelegramWebhookController(
                                 "🎬 Downloading video at ${resolution}p..."
                             )
 
-                            val file = ytDlpService.downloadVideo(url, resolution, "$chatId")
+                            val (errorMessage, file) = ytDlpService.downloadVideo(url, resolution, "$chatId")
                             if (file != null) {
                                 logger.info("Video download completed: {}, size: {} bytes", file.name, file.length())
+                                telegramBotService.editMessageText(chatId, messageId, "✅ Video downloaded.")
                                 if (file.length() < maxBotFileSize) {
                                     telegramBotService.sendFile(chatId, file)
                                 } else {
-                                    val encodedFileName = URLEncoder.encode(file.name, StandardCharsets.UTF_8.toString())
+                                    val encodedFileName =
+                                        URLEncoder.encode(file.name, StandardCharsets.UTF_8.toString())
                                     val downloadUrl = "$publicUrl/$chatId/$encodedFileName"
                                     telegramBotService.sendTextMessage(
                                         chatId,
-                                        "✅ Video downloaded. File is too large for Telegram. Download it here: $downloadUrl"
+                                        "File is too large for Telegram. Download it here: $downloadUrl"
                                     )
                                 }
                             } else {
-                                logger.error("Video download failed for URL: {}", url)
-                                telegramBotService.sendTextMessage(
+                                logger.error("Video download failed: {}", errorMessage)
+                                telegramBotService.editMessageText(
                                     chatId,
-                                    "❌ Video download failed."
+                                    messageId,
+                                    "❌ $errorMessage"
                                 )
                             }
-
-                            telegramBotService.editMessageText(chatId, messageId, "✅ Download complete!")
                         }
                     }
                 }

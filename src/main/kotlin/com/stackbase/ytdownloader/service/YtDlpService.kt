@@ -18,14 +18,15 @@ private const val OUTPUT_FILE_TEMPLATE = "%(title)s.%(ext)s"
 class YtDlpService(
     @Value("\${public.download.dir}") private val defaultDownloadDir: String,
     @Value("\${yt-dlp.ffmpeg.path}") private val ffmpegPath: String?,
+    @Value("\${public.download.file.max-size:500}") private val maxFileSizeMB: Int,
     @Value("\${yt-dlp.output:false}") private val enableOutput: Boolean
 ) {
     private val logger = LoggerFactory.getLogger(YtDlpService::class.java)
 
     private fun <T> executeCommand(
         command: List<String>,
-        onSuccess: () -> T,
-        onFailure: () -> T,
+        onSuccess: (String) -> T,
+        onFailure: (String) -> T,
         redirectOutput: Boolean = false
     ): T {
         try {
@@ -35,38 +36,100 @@ class YtDlpService(
                 .redirectErrorStream(true)
                 .start()
 
-            if (redirectOutput) {
-                process.inputStream.bufferedReader().forEachLine { logger.debug(it) }
+            // Capture the output
+            val outputBuffer = StringBuilder()
+            process.inputStream.bufferedReader().forEachLine { line ->
+                if (redirectOutput) {
+                    logger.debug(line)
+                }
+                outputBuffer.append(line).append("\n")
             }
 
             val exitCode = process.waitFor()
+            val output = outputBuffer.toString().trim()
 
-            if (exitCode == 0) {
+            return if (exitCode == 0) {
                 logger.info("Command executed successfully with exit code 0")
-                return onSuccess()
+                onSuccess(output)
             } else {
                 logger.error("Command failed with exit code: {}", exitCode)
+                onFailure(output)
             }
         } catch (e: IOException) {
             logger.error("IO exception while executing command", e)
+            return onFailure("IO error: ${e.message}")
         } catch (e: InterruptedException) {
             logger.error("Command execution interrupted", e)
             Thread.currentThread().interrupt()
+            return onFailure("Command interrupted: ${e.message}")
         } catch (e: Exception) {
             logger.error("Unexpected error executing command", e)
+            return onFailure("Unexpected error: ${e.message}")
         }
-        return onFailure()
     }
 
-    fun downloadVideo(url: String, resolution: Int = 720, outputDir: String? = null): File? {
+    private fun failureHandler(output: String): Pair<String, File?> {
+        logger.error("Download failed: {}", output)
+        return "Download failed: Unknown error" to null
+    }
+
+    private fun successHandler(output: String, outputPath: File, vararg extensions: String): Pair<String, File?> {
+        // Check for file size limit error patterns
+        return when {
+            output.contains("File is larger than max-filesize") ||
+                    output.contains("--max-filesize") ||
+                    output.contains("exceeds max-filesize") -> {
+                logger.error("Download failed: file size exceeds the limit of {}MB", maxFileSizeMB)
+                "File size exceeds the maximum limit of ${maxFileSizeMB}MB" to null
+            }
+
+            output.contains("This video is unavailable") -> {
+                logger.error("Download failed: video is unavailable")
+                "This video is unavailable" to null
+            }
+
+            output.contains("Private video") -> {
+                logger.error("Download failed: video is private")
+                "This video is private and cannot be accessed" to null
+            }
+
+            output.contains("has been removed") -> {
+                logger.error("Download failed: video has been removed")
+                "This video has been removed" to null
+            }
+
+            else -> {
+                val downloadedFile = outputPath.listFiles(FileFilter { file ->
+                    file.isFile && extensions.any { file.name.endsWith(it) }
+                })?.maxByOrNull { it.lastModified() }
+
+                if (downloadedFile != null) {
+                    logger.info(
+                        "Download complete: {}, size: {} bytes",
+                        downloadedFile.absolutePath, downloadedFile.length()
+                    )
+                    "Download success" to downloadedFile
+                } else {
+                    logger.warn("Download completed but file not found in output directory")
+                    "Download completed but file not found" to null
+                }
+            }
+        }
+    }
+
+    fun downloadVideo(url: String, resolution: Int = 720, outputDir: String? = null): Pair<String, File?> {
         logger.info("Starting video download: url={}, resolution={}p, outputDir={}", url, resolution, outputDir)
-        
-        val outputPath = if(outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
+
+        val outputPath =
+            if (outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
         outputPath.mkdirs()
+        outputPath.listFiles()?.forEach { it.delete() }
 
         val cmd = mutableListOf(
             "yt-dlp",
-            "-f", "bestvideo[height<=${resolution}]+bestaudio/best",
+            "-f", "bestvideo[height<=${resolution}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "--max-filesize", "${maxFileSizeMB}M",
             "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
         )
 
@@ -79,31 +142,18 @@ class YtDlpService(
 
         return executeCommand(
             cmd, redirectOutput = enableOutput,
-            onSuccess = {
-                val downloadedFile = outputPath.listFiles(FileFilter { file ->
-                    file.isFile && file.name.contains(".mp4")
-                })?.maxByOrNull { it.lastModified() }
-                
-                if (downloadedFile != null) {
-                    logger.info("Video download complete: {}, size: {} bytes", 
-                        downloadedFile.absolutePath, downloadedFile.length())
-                } else {
-                    logger.warn("Video download completed but file not found in output directory")
-                }
-                
-                downloadedFile
-            },
-            onFailure = {
-                logger.error("Video download failed for URL: {}", url)
-                null
-            })
+            onSuccess = { successHandler(it, outputPath, ".mp4", ".webm") },
+            onFailure = { errorOutput -> failureHandler(errorOutput) }
+        )
     }
 
-    fun downloadAudio(url: String, audioKbps: Int = 192, outputDir: String? = null): File? {
+    fun downloadAudio(url: String, audioKbps: Int = 192, outputDir: String? = null): Pair<String, File?> {
         logger.info("Starting audio download: url={}, quality={}kbps, outputDir={}", url, audioKbps, outputDir)
-        
-        val outputPath = if(outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
+
+        val outputPath =
+            if (outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
         outputPath.mkdirs()
+        outputPath.listFiles()?.forEach { it.delete() }
 
         val cmd = mutableListOf(
             "yt-dlp",
@@ -111,6 +161,7 @@ class YtDlpService(
             "--extract-audio",
             "--audio-format", "mp3",
             "--audio-quality", audioKbps.toString(),
+            "--max-filesize", "${maxFileSizeMB}M",
             "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
         )
 
@@ -123,23 +174,8 @@ class YtDlpService(
 
         return executeCommand(
             cmd, redirectOutput = enableOutput,
-            onSuccess = {
-                val downloadedFile = outputPath.listFiles(FileFilter { file ->
-                    file.isFile && file.name.contains(".mp3")
-                })?.maxByOrNull { it.lastModified() }
-                
-                if (downloadedFile != null) {
-                    logger.info("Audio download complete: {}, size: {} bytes", 
-                        downloadedFile.absolutePath, downloadedFile.length())
-                } else {
-                    logger.warn("Audio download completed but file not found in output directory")
-                }
-                
-                downloadedFile
-            },
-            onFailure = {
-                logger.error("Audio download failed for URL: {}", url)
-                null
-            })
+            onSuccess = { successHandler(it, outputPath, ".mp3") },
+            onFailure = this::failureHandler
+        )
     }
 }
