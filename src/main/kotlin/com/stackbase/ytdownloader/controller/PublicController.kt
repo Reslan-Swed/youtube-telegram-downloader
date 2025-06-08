@@ -1,8 +1,11 @@
 package com.stackbase.ytdownloader.controller
 
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.io.FileSystemResource
+import org.springframework.http.ContentDisposition
 import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -21,22 +24,42 @@ import kotlin.io.path.Path
 class PublicController(
     @Value("\${public.download.dir}") private val downloadPath: String
 ) {
+    private val logger = LoggerFactory.getLogger(PublicController::class.java)
+
     @GetMapping("/download/{chatId}/{filename}")
     fun downloadFile(@PathVariable chatId: Long, @PathVariable filename: String): ResponseEntity<FileSystemResource> {
-
         // Decode the URL-encoded filename
         val decodedFilename = URLDecoder.decode(filename, StandardCharsets.UTF_8.toString())
+        logger.info("Download request received for file: {}", decodedFilename)
 
-        println("Downloading file: $decodedFilename")
         val file = Path(downloadPath, chatId.toString(), decodedFilename).toFile()
-        println("$file File exists: ${file.exists()}")
+        logger.debug("File path: {}, exists: {}", file.absolutePath, file.exists())
 
         if (!file.exists()) {
+            logger.warn("File not found: {}", file.absolutePath)
             return ResponseEntity.notFound().build()
         }
 
+        val contentType = when {
+            file.name.endsWith(".mp4") -> MediaType.parseMediaType("video/mp4")
+            file.name.endsWith(".mp3") -> MediaType.parseMediaType("audio/mpeg")
+            file.name.endsWith(".webm") -> MediaType.parseMediaType("video/webm")
+            else -> MediaType.APPLICATION_OCTET_STREAM
+        }
+
+        val headers = HttpHeaders().let {
+            it.contentDisposition = ContentDisposition
+                .builder("attachment")
+                .filename(file.name, StandardCharsets.UTF_8)
+                .build()
+            it.contentType = contentType
+            it.contentLength = file.length()
+            it
+        }
+
+        logger.info("Serving file for download: {}, size: {} bytes", file.name, file.length())
         return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"${file.name}\"")
+            .headers(headers)
             .body(FileSystemResource(file))
     }
 }
