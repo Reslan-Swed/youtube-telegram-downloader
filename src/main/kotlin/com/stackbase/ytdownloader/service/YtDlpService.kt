@@ -152,8 +152,8 @@ class YtDlpService(
                 "yt-dlp",
                 "--max-filesize", "${maxFileSizeMB}M",
                 "--no-playlist",
-                "--retries", "3",
-                "--fragment-retries", "3",
+                "--retries", "1",
+                "--fragment-retries", "1",
                 "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
             ).also {
                 if (forAudio) {
