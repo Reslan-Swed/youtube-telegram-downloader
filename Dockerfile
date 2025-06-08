@@ -42,6 +42,8 @@ ENV PUBLIC_DOWNLOAD_URL=REQUIRED_AT_RUNTIME
 ENV TELEGRAM_BOT_FILE_MAX_SIZE=50
 ENV PUBLIC_DOWNLOAD_FILE_MAX_SIZE=500
 ENV YT_DLP_FFMPEG_PATH=/usr/bin/ffmpeg
+ENV YT_DLP_COOKIES_PATH=/app/cookies.txt
+ENV FILE_CLEANUP_MAX_AGE_HOURS=24
 
 # Expose the port (Railway will detect this)
 EXPOSE ${APP_PORT}
@@ -55,4 +57,6 @@ CMD ["sh", "-c", "if [ \"$PUBLIC_DOWNLOAD_URL\" = \"REQUIRED_AT_RUNTIME\" ]; the
     --public.download.url=${PUBLIC_DOWNLOAD_URL} \
     --telegram.bot.file.max-size=${TELEGRAM_BOT_FILE_MAX_SIZE} \
     --public.download.file.max-size=${PUBLIC_DOWNLOAD_FILE_MAX_SIZE} \
-    --yt-dlp.ffmpeg.path=${YT_DLP_FFMPEG_PATH}"]
+    --yt-dlp.ffmpeg.path=${YT_DLP_FFMPEG_PATH} \
+    --yt-dlp.cookies.path=${YT_DLP_COOKIES_PATH} \
+    --file.cleanup.max-age-hours=${FILE_CLEANUP_MAX_AGE_HOURS}"]

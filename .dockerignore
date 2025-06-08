@@ -5,3 +5,4 @@ downloads/
 logs/
 *.iml
 src/main/resources/application-dev.properties
+cookies.txt

@@ -35,3 +35,4 @@ build/
 downloads/
 logs/
 src/main/resources/application-dev.properties
+cookies.txt

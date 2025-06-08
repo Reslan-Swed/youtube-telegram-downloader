@@ -26,8 +26,10 @@ docker run -d \
   -p 8080:8080 \
   -e TELEGRAM_BOT_TOKEN=your_telegram_bot_token \
   -e PUBLIC_DOWNLOAD_URL=https://your-domain.com/public/download \
+  -e YT_DLP_COOKIES_PATH=/app/cookies.txt \
   -v /path/to/downloads:/app/downloads \
   -v /path/to/logs:/app/logs \
+  -v /path/to/cookies.txt:/app/cookies.txt \
   youtube-telegram-downloader
 ```
 
@@ -41,6 +43,8 @@ docker run -d \
 | `TELEGRAM_BOT_FILE_MAX_SIZE` | Maximum file size (MB) for Telegram | `50` |
 | `PUBLIC_DOWNLOAD_FILE_MAX_SIZE` | Maximum file size (MB) for public downloads | `500` |
 | `YT_DLP_FFMPEG_PATH` | Path to ffmpeg in the container | `/usr/bin/ffmpeg` |
+| `YT_DLP_COOKIES_PATH` | Path to cookies file for yt-dlp | `cookies.txt` |
+| `FILE_CLEANUP_MAX_AGE_HOURS` | Hours after which downloaded files are automatically deleted | `24` |
 | `APP_PORT` | Application port | `8080` |
 | `SPRING_PROFILES_ACTIVE` | Spring profile to activate | `prod` |
 

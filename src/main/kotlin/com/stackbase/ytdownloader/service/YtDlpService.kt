@@ -19,7 +19,8 @@ class YtDlpService(
     @Value("\${public.download.dir}") private val defaultDownloadDir: String,
     @Value("\${yt-dlp.ffmpeg.path}") private val ffmpegPath: String?,
     @Value("\${public.download.file.max-size:500}") private val maxFileSizeMB: Int,
-    @Value("\${yt-dlp.output:false}") private val enableOutput: Boolean
+    @Value("\${yt-dlp.output:false}") private val enableOutput: Boolean,
+    @Value("\${yt-dlp.cookies.path:cookies.txt}") private val cookiesPath: String?
 ) {
     private val logger = LoggerFactory.getLogger(YtDlpService::class.java)
 
@@ -120,62 +121,74 @@ class YtDlpService(
     fun downloadVideo(url: String, resolution: Int = 720, outputDir: String? = null): Pair<String, File?> {
         logger.info("Starting video download: url={}, resolution={}p, outputDir={}", url, resolution, outputDir)
 
-        val outputPath =
-            if (outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
-        outputPath.mkdirs()
-        outputPath.listFiles()?.forEach { it.delete() }
+        val outputPath = prepareFolder(outputDir)
 
-        val cmd = mutableListOf(
-            "yt-dlp",
-            "-f", "bestvideo[height<=${resolution}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "--merge-output-format", "mp4",
-            "--max-filesize", "${maxFileSizeMB}M",
-            "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
-        )
-
-        if (ffmpegPath != null) {
-            cmd.add("--ffmpeg-location")
-            cmd.add(ffmpegPath)
-        }
-
-        cmd.add(url)
+        val cmd = constructCommand(url, "$outputPath")(resolution)
 
         return executeCommand(
             cmd, redirectOutput = enableOutput,
             onSuccess = { successHandler(it, outputPath, ".mp4", ".webm") },
-            onFailure = { errorOutput -> failureHandler(errorOutput) }
+            onFailure = this::failureHandler
         )
     }
 
     fun downloadAudio(url: String, audioKbps: Int = 192, outputDir: String? = null): Pair<String, File?> {
         logger.info("Starting audio download: url={}, quality={}kbps, outputDir={}", url, audioKbps, outputDir)
 
-        val outputPath =
-            if (outputDir != null) Path(defaultDownloadDir, outputDir).toFile() else File(defaultDownloadDir)
-        outputPath.mkdirs()
-        outputPath.listFiles()?.forEach { it.delete() }
+        val outputPath = prepareFolder(outputDir)
 
-        val cmd = mutableListOf(
-            "yt-dlp",
-            "-f", "bestaudio",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", audioKbps.toString(),
-            "--max-filesize", "${maxFileSizeMB}M",
-            "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
-        )
-
-        if (ffmpegPath != null) {
-            cmd.add("--ffmpeg-location")
-            cmd.add(ffmpegPath)
-        }
-
-        cmd.add(url)
+        val cmd = constructCommand(url, "$outputPath", forAudio = true)(audioKbps)
 
         return executeCommand(
             cmd, redirectOutput = enableOutput,
             onSuccess = { successHandler(it, outputPath, ".mp3") },
             onFailure = this::failureHandler
         )
+    }
+
+    private fun constructCommand(url: String, outputPath: String, forAudio: Boolean = false): (Int) -> List<String> =
+        { quality ->
+            mutableListOf(
+                "yt-dlp",
+                "--max-filesize", "${maxFileSizeMB}M",
+                "--no-playlist",
+                "--retries", "3",
+                "--fragment-retries", "3",
+                "-o", "$outputPath/$OUTPUT_FILE_TEMPLATE"
+            ).also {
+                if (forAudio) {
+                    it.addAll(
+                        listOf(
+                            "-f", "bestaudio",
+                            "--extract-audio",
+                            "--audio-format", "mp3",
+                            "--audio-quality", quality.toString()
+                        )
+                    )
+                } else {
+                    it.addAll(
+                        listOf(
+                            "-f", "bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                            "--merge-output-format", "mp4",
+                        )
+                    )
+                }
+                if (ffmpegPath != null) {
+                    it.add("--ffmpeg-location")
+                    it.add(ffmpegPath)
+                }
+                if (cookiesPath != null && File(cookiesPath).exists()) {
+                    it.add("--cookies")
+                    it.add(cookiesPath)
+                }
+                it.add(url)
+            }
+        }
+
+    private fun prepareFolder(outputPath: String?): File {
+        val path =
+            (if (outputPath != null) Path(defaultDownloadDir, outputPath).toFile() else File(defaultDownloadDir))
+                .apply { mkdirs() }
+        return path
     }
 }

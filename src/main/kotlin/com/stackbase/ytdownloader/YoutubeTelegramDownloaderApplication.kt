@@ -2,10 +2,12 @@ package com.stackbase.ytdownloader
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
+import org.springframework.scheduling.annotation.EnableScheduling
 import java.io.File
 import org.slf4j.LoggerFactory
 
 @SpringBootApplication
+@EnableScheduling
 class YoutubeTelegramDownloaderApplication {
     companion object {
         private val logger = LoggerFactory.getLogger(YoutubeTelegramDownloaderApplication::class.java)
