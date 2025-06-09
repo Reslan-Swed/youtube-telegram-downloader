@@ -36,9 +36,9 @@ class FileCleanupService(
         }
 
         // Process each chat ID directory
-        val deletedCount = downloadDirectory.listFiles()?.filter { it.isDirectory }?.forEach {
+        val deletedCount = downloadDirectory.listFiles()?.filter { it.isDirectory }?.sumOf {
             deleteDirectory(it)
-        }
+        } ?: 0
 
         logger.info("File cleanup completed. Deleted {} files", deletedCount)
     }
