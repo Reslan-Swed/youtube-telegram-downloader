@@ -1,6 +1,8 @@
 package com.stackbase.ytdownloader.service
 
 import com.pengrad.telegrambot.TelegramBot
+import com.pengrad.telegrambot.model.CallbackQuery
+import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.request.SendMessage
@@ -13,6 +15,13 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.util.UUID
+
+private const val AUDIO = "audio"
+private const val VIDEO = "video"
+private const val FORMAT = "format"
 
 /**
  * @author Reslan Swed
@@ -20,14 +29,43 @@ import java.io.File
  */
 @Service
 class TelegramBotService(
-    @Value("\${telegram.bot.token}") private val botToken: String
+    @Value("\${telegram.bot.token}") private val botToken: String,
+    private val ytDlpService: YtDlpService,
+    @Value("\${public.download.url}") private val publicUrl: String,
+    @Value("\${telegram.bot.file.max-size}") private val botFileSizeMbLimit: Int
 ) {
     private val logger = LoggerFactory.getLogger(TelegramBotService::class.java)
-    val bot = TelegramBot(botToken)
 
-    fun handleCommand(chatId: Long, messageText: String) {
-        logger.info("Handling command for chat {}: {}", chatId, messageText)
-        
+    private val bot = TelegramBot(botToken)
+    private val maxBotFileSize = botFileSizeMbLimit * 1024 * 1024
+    private val formatUnit: (String) -> Pair<String, String> = {
+        when (it) {
+            AUDIO -> "quality" to "kbps"
+            VIDEO -> "resolution" to "p"
+            else -> "" to ""
+        }
+    }
+    private val formatIcon: (String) -> String = {
+        when (it) {
+            AUDIO -> "🎵"
+            VIDEO -> "🎬"
+            else -> ""
+        }
+    }
+    private val availableQuality: (String) -> List<String> = {
+        when (it) {
+            AUDIO -> listOf("128kbps", "192kbps", "256kbps")
+            VIDEO -> listOf("360p", "480p", "720p", "1080p")
+            else -> emptyList()
+        }
+    }
+
+    fun handleCommand(message: Message) {
+        val chatId = message.chat().id()
+        val messageText = message.text()
+
+        logger.info("Received message from chat {}: {}", chatId, messageText)
+
         when {
             messageText.startsWith("/start") -> handleStartCommand(chatId)
 
@@ -37,7 +75,7 @@ class TelegramBotService(
                 val url = messageText.removePrefix("/audio").trim()
                 if (isYoutubeUrl(url)) {
                     logger.info("Processing audio command with URL: {}", url)
-                    showAudioQualityOptions(chatId, url)
+                    showQualityOptions(chatId, url, AUDIO)
                 } else {
                     logger.warn("Invalid YouTube URL for audio: {}", url)
                     sendTextMessage(chatId, "❌ Invalid YouTube URL for audio.")
@@ -48,7 +86,7 @@ class TelegramBotService(
                 val url = messageText.removePrefix("/video").trim()
                 if (isYoutubeUrl(url)) {
                     logger.info("Processing video command with URL: {}", url)
-                    showVideoResolutionOptions(chatId, url)
+                    showQualityOptions(chatId, url, VIDEO)
                 } else {
                     logger.warn("Invalid YouTube URL for video: {}", url)
                     sendTextMessage(chatId, "❌ Invalid YouTube URL for video.")
@@ -136,6 +174,79 @@ class TelegramBotService(
         sendTextMessage(chatId, text)
     }
 
+    fun handleCallback(callbackQuery: CallbackQuery) {
+        val chatId = callbackQuery.message().chat().id()
+        val messageId = callbackQuery.message().messageId()
+        val data = callbackQuery.data().split("|")
+        val callbackId = callbackQuery.id()
+        logger.info("Received callback from chat {}: {}", chatId, data)
+
+        val type = data[0]
+
+        when (type) {
+            FORMAT -> {
+                // User selected format (audio/video)
+                val format = data[1]
+                val url = data[2]
+
+                logger.info("User selected format: {}, URL: {}", format, url)
+
+                // Show quality options based on format
+                showQualityOptions(chatId, url, format, messageId)
+            }
+
+            AUDIO, VIDEO -> {
+                // User selected audio quality/video resolution
+                val quality = data[1].toInt()
+                val url = YouTubeUrlShortener.toFull(data[2])
+                val outputDir = "${uuidStringFromId(chatId.toString())}/${System.currentTimeMillis()}"
+                val (_, unit) = formatUnit(type)
+                val icon = formatIcon(type)
+                val method = if (type == AUDIO) ytDlpService::downloadAudio else ytDlpService::downloadVideo
+
+                logger.info("Starting {} download: {}{}, URL: {}", type, quality, unit, url)
+                answerCallback(callbackId, "$icon Downloading started...")
+                editMessageText(
+                    chatId,
+                    messageId,
+                    "$icon Downloading $type at ${quality}$unit..."
+                )
+                val (errorMessage, file) = method(url, quality, outputDir)
+                if (file != null) {
+                    logger.info(
+                        "{} download completed: {}, size: {} bytes",
+                        type.replaceFirstChar { it.titlecase() },
+                        file.name,
+                        file.length()
+                    )
+                    editMessageText(
+                        chatId,
+                        messageId,
+                        "✅ ${type.replaceFirstChar { it.titlecase() }} downloaded."
+                    )
+                    if (file.length() < maxBotFileSize) {
+                        sendFile(chatId, file)
+                    } else {
+                        val encodedFileName =
+                            URLEncoder.encode(file.name, StandardCharsets.UTF_8.toString())
+                        val downloadUrl = "$publicUrl/$outputDir/$encodedFileName"
+                        sendTextMessage(
+                            chatId,
+                            "File is too large for Telegram. Download it here: $downloadUrl"
+                        )
+                    }
+                } else {
+                    logger.error(
+                        "{} download failed: {}",
+                        type.replaceFirstChar { it.titlecase() },
+                        errorMessage
+                    )
+                    editMessageText(chatId, messageId, "❌ $errorMessage")
+                }
+            }
+        }
+    }
+
     fun sendTextMessage(chatId: Long, text: String) {
         try {
             logger.debug("Sending text message to chat {}: {}", chatId, text)
@@ -161,13 +272,13 @@ class TelegramBotService(
     }
 
     // Show format options (audio/video)
-    fun showFormatOptions(chatId: Long, url: String) {
+    private fun showFormatOptions(chatId: Long, url: String) {
         val shortUrl = YouTubeUrlShortener.toShort(url)
 
         val keyboard = InlineKeyboardMarkup(
             arrayOf(
-                InlineKeyboardButton("🎵 Audio").callbackData("format|audio|$shortUrl"),
-                InlineKeyboardButton("🎬 Video").callbackData("format|video|$shortUrl")
+                InlineKeyboardButton("${formatIcon(AUDIO)} Audio").callbackData("$FORMAT|$AUDIO|$shortUrl"),
+                InlineKeyboardButton("${formatIcon(VIDEO)} Video").callbackData("$FORMAT|$VIDEO|$shortUrl")
             )
         )
 
@@ -177,58 +288,42 @@ class TelegramBotService(
         )
     }
 
-    // Show audio quality options
-    fun showAudioQualityOptions(chatId: Long, url: String, messageId: Int? = null) {
+    private fun showQualityOptions(chatId: Long, url: String, type: String, messageId: Int? = null) {
         val shortUrl = YouTubeUrlShortener.toShort(url)
 
+        val availableQuality = availableQuality(type)
+        val (label, unit) = formatUnit(type)
+        val icon = formatIcon(type)
+
         val keyboard = InlineKeyboardMarkup(
-            arrayOf(
-                InlineKeyboardButton("128kbps").callbackData("audio|128|$shortUrl"),
-                InlineKeyboardButton("192kbps").callbackData("audio|192|$shortUrl"),
-                InlineKeyboardButton("256kbps").callbackData("audio|256|$shortUrl")
-            )
+            availableQuality.map { InlineKeyboardButton("$it$unit").callbackData("$type|$it|$shortUrl") }
+                .toTypedArray()
         )
 
-        val text = "🎵 Choose audio quality:"
-        val message = if(messageId != null) EditMessageText(chatId, messageId, text).replyMarkup(keyboard)
+        val text = "$icon Choose $type $label:"
+        val message = if (messageId != null) EditMessageText(chatId, messageId, text).replyMarkup(keyboard)
         else SendMessage(chatId, text).replyMarkup(keyboard)
 
         bot.execute(message)
     }
 
-    // Show video resolution options
-    fun showVideoResolutionOptions(chatId: Long, url: String, messageId: Int? = null) {
-        val shortUrl = YouTubeUrlShortener.toShort(url)
-
-        val keyboard = InlineKeyboardMarkup(
-            arrayOf(
-                InlineKeyboardButton("360p").callbackData("video|360|$shortUrl"),
-                InlineKeyboardButton("480p").callbackData("video|480|$shortUrl"),
-                InlineKeyboardButton("720p").callbackData("video|720|$shortUrl"),
-                InlineKeyboardButton("1080p").callbackData("video|1080|$shortUrl")
-            )
-        )
-
-        val text = "🎬 Choose video resolution:"
-        val message = if(messageId != null) EditMessageText(chatId, messageId, text).replyMarkup(keyboard)
-        else SendMessage(chatId, text).replyMarkup(keyboard)
-
-        bot.execute(message)
-    }
-
-    fun answerCallback(callbackQueryId: String, message: String = "") {
+    private fun answerCallback(callbackQueryId: String, message: String = "") {
         bot.execute(AnswerCallbackQuery(callbackQueryId).text(message))
     }
 
-    fun removeInlineKeyboard(chatId: Long, messageId: Int) {
+    private fun removeInlineKeyboard(chatId: Long, messageId: Int) {
         bot.execute(EditMessageReplyMarkup(chatId, messageId).replyMarkup(InlineKeyboardMarkup()))
     }
 
-    fun sendFile(chatId: Long, file: File) {
+    private fun sendFile(chatId: Long, file: File) {
         bot.execute(SendDocument(chatId, file))
     }
 
-    fun isYoutubeUrl(text: String): Boolean {
+    private fun isYoutubeUrl(text: String): Boolean {
         return text.contains("youtube.com") || text.contains("youtu.be")
+    }
+
+    private fun uuidStringFromId(id: String): String {
+        return UUID.nameUUIDFromBytes(id.toByteArray()).toString()
     }
 }

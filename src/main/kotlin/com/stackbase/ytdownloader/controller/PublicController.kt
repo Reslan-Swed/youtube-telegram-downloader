@@ -26,13 +26,13 @@ class PublicController(
 ) {
     private val logger = LoggerFactory.getLogger(PublicController::class.java)
 
-    @GetMapping("/download/{chatId}/{filename}")
-    fun downloadFile(@PathVariable chatId: Long, @PathVariable filename: String): ResponseEntity<FileSystemResource> {
+    @GetMapping("/download/{chatId}/{folderName}/{filename}")
+    fun downloadFile(@PathVariable chatId: String, @PathVariable folderName: String, @PathVariable filename: String): ResponseEntity<FileSystemResource> {
         // Decode the URL-encoded filename
         val decodedFilename = URLDecoder.decode(filename, StandardCharsets.UTF_8.toString())
         logger.info("Download request received for file: {}", decodedFilename)
 
-        val file = Path(downloadPath, chatId.toString(), decodedFilename).toFile()
+        val file = Path(downloadPath, chatId, folderName, decodedFilename).toFile()
         logger.debug("File path: {}, exists: {}", file.absolutePath, file.exists())
 
         if (!file.exists()) {

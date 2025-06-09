@@ -29,46 +29,51 @@ class FileCleanupService(
     fun cleanupOldFiles() {
         logger.info("Starting scheduled file cleanup")
         val downloadDirectory = File(downloadDir)
-        
+
         if (!downloadDirectory.exists() || !downloadDirectory.isDirectory) {
             logger.warn("Download directory does not exist: {}", downloadDirectory.absolutePath)
             return
         }
-        
+
+        // Process each chat ID directory
+        val deletedCount = downloadDirectory.listFiles()?.filter { it.isDirectory }?.forEach {
+            deleteDirectory(it)
+        }
+
+        logger.info("File cleanup completed. Deleted {} files", deletedCount)
+    }
+
+    private fun deleteDirectory(directory: File): Int {
         var deletedCount = 0
         val now = Instant.now()
-        
-        // Process each chat ID directory
-        downloadDirectory.listFiles()?.filter { it.isDirectory }?.forEach { chatDir ->
-            chatDir.listFiles()?.forEach { file ->
-                try {
-                    if (file.isFile) {
-                        val attrs = Files.readAttributes(file.toPath(), BasicFileAttributes::class.java)
-                        val fileAge = Duration.between(attrs.creationTime().toInstant(), now)
-                        
-                        // Delete files older than the configured max age
-                        if (fileAge.toHours() > maxAgeHours) {
-                            if (file.delete()) {
-                                logger.info("Deleted old file: {} (age: {} hours)", file.absolutePath, fileAge.toHours())
-                                deletedCount++
-                            } else {
-                                logger.warn("Failed to delete old file: {}", file.absolutePath)
-                            }
+
+        directory.listFiles()?.forEach { file ->
+            try {
+                deletedCount += if (file.isFile) {
+                    val attrs = Files.readAttributes(file.toPath(), BasicFileAttributes::class.java)
+                    val fileAge = Duration.between(attrs.creationTime().toInstant(), now)
+
+                    // Delete files older than the configured max age
+                    if (fileAge.toHours() > maxAgeHours) {
+                        if (file.delete()) {
+                            logger.info("Deleted old file: {} (age: {} hours)", file.absolutePath, fileAge.toHours())
+                            1
+                        } else {
+                            logger.warn("Failed to delete old file: {}", file.absolutePath)
+                            0
                         }
-                    }
-                } catch (e: Exception) {
-                    logger.error("Error processing file {}: {}", file.absolutePath, e.message, e)
-                }
-            }
-            
-            // Delete empty chat directories
-            if (chatDir.listFiles()?.isEmpty() == true) {
-                if (chatDir.delete()) {
-                    logger.info("Deleted empty chat directory: {}", chatDir.absolutePath)
-                }
+                    } else 0
+                } else deleteDirectory(file)
+            } catch (e: Exception) {
+                logger.error("Error processing file {}: {}", file.absolutePath, e.message, e)
             }
         }
-        
-        logger.info("File cleanup completed. Deleted {} files", deletedCount)
+
+        // Delete empty chat directories
+        if (directory.listFiles()?.isEmpty() == true && directory.delete()) {
+            logger.info("Deleted empty directory: {}", directory.absolutePath)
+        }
+
+        return deletedCount
     }
 }
