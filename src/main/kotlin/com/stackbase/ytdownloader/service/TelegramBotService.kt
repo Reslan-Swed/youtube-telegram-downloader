@@ -52,10 +52,10 @@ class TelegramBotService(
             else -> ""
         }
     }
-    private val availableQuality: (String) -> List<String> = {
+    private val availableQuality: (String) -> List<Int> = {
         when (it) {
-            AUDIO -> listOf("128kbps", "192kbps", "256kbps")
-            VIDEO -> listOf("360p", "480p", "720p", "1080p")
+            AUDIO -> listOf(128, 192, 256)
+            VIDEO -> listOf(360, 480, 720, 1080)
             else -> emptyList()
         }
     }
